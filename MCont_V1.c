@@ -17,6 +17,7 @@
 volatile int state = 0;
 
 #define TAU 1e6 // time constant in us for low-pass filter
+const int timer_ms = 10; // 100ms update velocity without hall trigger
 
 // controls, velocity feedback, and volts per hertz values
 volatile int dir = 0;
@@ -148,11 +149,11 @@ bool timer_callback(struct repeating_timer *t)
         motor_rpm = 0.0f;
 
     // update volts per hertz control with new speed
-    // float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
-    // pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
+    float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
+    pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
     
     cancel_repeating_timer(&timer);
-    add_repeating_timer_ms(1, (repeating_timer_callback_t)timer_callback, NULL, &timer);
+    add_repeating_timer_ms(timer_ms, (repeating_timer_callback_t)timer_callback, NULL, &timer);
     return true;
 }
 
@@ -184,12 +185,12 @@ void irq_handler(uint gpio, uint32_t events) {
     motor_rpm = alpha * raw_rpm + (1.0f - alpha) * motor_rpm;
 
     // update volts per hertz control with new speed
-    // float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
-    // pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
+    float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
+    pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
 
     // reset the timer to call this function again in 100ms if no step is detected
     cancel_repeating_timer(&timer);
-    add_repeating_timer_ms(1, (repeating_timer_callback_t)timer_callback, NULL, &timer);
+    add_repeating_timer_ms(timer_ms, (repeating_timer_callback_t)timer_callback, NULL, &timer);
 }
 
 // Update controls on rising & falling edges of PWM signal. 
@@ -202,6 +203,15 @@ int main() {
     // overclocking, be aware that changing the system clock affects the switching dead time!
     set_sys_clock_khz(250000, true) ;
     stdio_init_all();
+
+    // Highest priority: PIO PWM interrupt
+    irq_set_priority(PIO0_IRQ_0, 0);
+    irq_set_priority(IO_IRQ_BANK0, 1);
+    irq_set_priority(TIMER_IRQ_0, 3);
+
+    irq_set_enabled(PIO0_IRQ_0, true);
+    irq_set_enabled(IO_IRQ_BANK0, true);
+    irq_set_enabled(TIMER_IRQ_0, true);
     
     gpio_init(LED);
     gpio_set_dir(LED, GPIO_OUT);
@@ -234,7 +244,7 @@ int main() {
     }
 
     // add a timer that will call the irq_handler if no step has been detected for 100ms
-    add_repeating_timer_ms(1, (repeating_timer_callback_t)timer_callback, NULL, &timer);    
+    add_repeating_timer_ms(timer_ms, (repeating_timer_callback_t)timer_callback, NULL, &timer);    
     
     // configure adc for throttle input
     gpio_init(THROTTLE_ADC);
@@ -244,17 +254,19 @@ int main() {
     adc_select_input(0);
 
     dir = 0;
+    // state = 0; // REMEMBER TO COMMENT OUT LATER !!
+    motor_rpm = 0;
 
     while (true)
     {
-        throttle = (float)adc_deadzone(adc_read()) / 4095.0f;
+        // throttle = (float)adc_deadzone(adc_read()) / 4095.0f;
 
         // dir = (throttle_ < 0) ? 1 : 0;
         // throttle = abs(throttle_) ;
 
-        // printf("State: %d\n", state);
+        // printf("Throttle: %f\n", throttle);
         
-        // throttle = 0.01;
+        throttle = 0.01;
         
         float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
         pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
