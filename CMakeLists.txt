@@ -50,6 +50,7 @@ pico_generate_pio_header(MCont_V1 ${CMAKE_CURRENT_LIST_DIR}/gate_drive.pio)
 # Add the standard library to the build
 target_link_libraries(MCont_V1
         pico_bootsel_via_double_reset
+        pico_multicore 
         hardware_pio
         hardware_adc
         hardware_clocks
