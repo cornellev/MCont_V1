@@ -261,8 +261,8 @@ int main() {
                 motor_rpm = 0.0f;
         }
 
-        // throttle = (float)adc_deadzone(adc_read()) / 4095.0f;
-        throttle = 0.01;
+        throttle = (float)adc_deadzone(adc_read()) / 4095.0f;
+        // throttle = 0.01;
         float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
         pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
     }
