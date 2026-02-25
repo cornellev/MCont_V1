@@ -15,13 +15,14 @@
 
 // the rotor position as defined by hall input values. 
 // note that this value does not change incrementally as the motor moves!
-volatile int state = 0;
+volatile int state;
+volatile int prev_state;
 
 #define TAU 1e6 // time constant in us for low-pass filter
 const int timer_us = 100 * 1000; // 100ms update velocity without hall trigger
 
 // controls, velocity feedback, and volts per hertz values
-volatile int dir = 0;
+volatile int dir = 1;
 volatile float throttle = 0;
 volatile float prev_throttle = 0;
 volatile float motor_rpm = 0.0f;
@@ -120,7 +121,9 @@ void update_control() {
     // Only use deadtime for switching phase; i.e. the grounded phase remains grounded. 
     uint32_t deadtime = (prev_throttle == 0 & throttle == 0) ?
                         0b000000 | (1 << shift[dir][state][0]) | (1 << shift[dir][state][2]) :
-                        0b000000 | (1 << shift[dir][state][0]); 
+                            ((prev_state != state) ?
+                            0b000000 | (1 << shift[dir][state][0]) | (1 << shift[dir][state][2]) :
+                            0b000000 | (1 << shift[dir][state][0])); 
     uint32_t control = (throttle == 0) ?
                         0b000000 | (1 << shift[dir][state][0]) | (0 << shift[dir][state][1]) | (1 << shift[dir][state][2]) :
                         0b000000 | (1 << shift[dir][state][0]) | (pwm << shift[dir][state][1]) | (!pwm << shift[dir][state][2]); 
@@ -135,6 +138,7 @@ void irq_handler(uint gpio, uint32_t events) {
     int a = gpio_get(input_pins[0]);
     int b = gpio_get(input_pins[1]);
     int c = gpio_get(input_pins[2]);
+    prev_state = state;
     state = ((a << 2) | (b << 1) | (c)) - 1;
     update_control();
 
@@ -170,30 +174,57 @@ void pwm_irq0() {
 
 // Please only include print statements on core 1!
 void core1_entry() {
-    int print_time = time_us_64();
-    while (true) {
-        if (time_us_64() - print_time > 1000) {
-            print_time = time_us_64();
-            printf("Here\n");
-        }
-        tight_loop_contents();
-    }
+    // int print_time = time_us_64();
+    // while (true) {
+    //     if (time_us_64() - print_time > 1000) {
+    //         print_time = time_us_64();
+    //         printf("Here\n");
+    //     }
+    //     tight_loop_contents();
+    // }
+
+    
+    irq_set_priority(IO_IRQ_BANK0, 1);
+    irq_set_enabled(IO_IRQ_BANK0, true);
+
+    // hall effect sensors
+    for (int i = 0; i < NUM_INPUTS; i++)
+    {
+        gpio_init(input_pins[i]);
+        gpio_set_dir(input_pins[i], GPIO_IN);
+        gpio_pull_up(input_pins[i]);
+        gpio_set_irq_enabled(
+            input_pins[i], 
+            GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, 
+            true
+        );
+    }  
+
+    gpio_set_irq_enabled_with_callback(
+        input_pins[0], 
+        GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, 
+        true, 
+        &irq_handler
+    );
+
+    int a = gpio_get(input_pins[0]);
+    int b = gpio_get(input_pins[1]);
+    int c = gpio_get(input_pins[2]);
+    state = ((a << 2) | (b << 1) | (c)) - 1;
+    prev_state = state;
+
 }
 
 int main() {
     // Overclocking, be aware that changing the system clock affects the switching dead time!
     set_sys_clock_khz(250000, true) ;
     stdio_init_all();
-    // multicore_launch_core1(core1_entry); // Uncomment to use print statements
+    multicore_launch_core1(core1_entry); // Uncomment to use print statements
 
     // Highest priority assigned to PIO PWM interrupt
     irq_set_priority(PIO0_IRQ_0, 0);
-    irq_set_priority(IO_IRQ_BANK0, 1);
-    irq_set_priority(TIMER_IRQ_0, 3);
 
     irq_set_enabled(PIO0_IRQ_0, true);
-    irq_set_enabled(IO_IRQ_BANK0, true);
-    irq_set_enabled(TIMER_IRQ_0, true);
     
     // Status LED
     gpio_init(LED);
@@ -215,21 +246,6 @@ int main() {
     uint gd_offset = pio_add_program(gd_pio, &gate_drive_program);
     gate_drive_program_init(gd_pio, gd_sm, gd_offset, OUT_PINS);
     pio_sm_set_enabled(gd_pio, gd_sm, true);
-
-    // hall effect sensors
-    gpio_set_irq_enabled_with_callback(input_pins[0], GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true, &irq_handler);
-    for (int i = 0; i < NUM_INPUTS; i++)
-    {
-        gpio_init(input_pins[i]);
-        gpio_set_dir(input_pins[i], GPIO_IN);
-        gpio_pull_up(input_pins[i]);
-        gpio_set_irq_enabled(input_pins[i], GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
-    }  
-
-    int a = gpio_get(input_pins[0]);
-    int b = gpio_get(input_pins[1]);
-    int c = gpio_get(input_pins[2]);
-    state = ((a << 2) | (b << 1) | (c)) - 1;
     
     // configure adc for throttle input
     gpio_init(THROTTLE_ADC);
@@ -262,7 +278,7 @@ int main() {
         }
 
         throttle = (float)adc_deadzone(adc_read()) / 4095.0f;
-        // throttle = 0.01;
+        // throttle = 0.005;
         float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
         pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
     }
