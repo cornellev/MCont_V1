@@ -22,9 +22,10 @@ volatile int prev_state;
 const int timer_us = 100 * 1000; // 100ms update velocity without hall trigger
 
 // controls, velocity feedback, and volts per hertz values
-volatile int dir = 1;
+volatile int dir = 1; // Car dir = 1, dyno dir = 1
 volatile float throttle = 0;
 volatile float prev_throttle = 0;
+volatile uint32_t prev_control = 0b000000;
 volatile float motor_rpm = 0.0f;
 const float RATED_MOTOR_RPM = 3000.0f;
 const float RATED_MOTOR_VOLTAGE = 12.0f;
@@ -118,19 +119,49 @@ void pio_pwm_set_level(PIO pio, uint sm, uint32_t level) {
 void update_control() {
     int pwm = gpio_get(PWM_PIN);  
 
-    // Only use deadtime for switching phase; i.e. the grounded phase remains grounded. 
-    uint32_t deadtime = (prev_throttle == 0 & throttle == 0) ?
-                        0b000000 | (1 << shift[dir][state][0]) | (1 << shift[dir][state][2]) :
-                            ((prev_state != state) ?
-                            0b000000 | (1 << shift[dir][state][0]) | (1 << shift[dir][state][2]) :
-                            0b000000 | (1 << shift[dir][state][0])); 
+    // uint32_t deadtime = (prev_throttle == 0 & throttle == 0) ?
+    //                     0b000000 | (1 << shift[dir][state][0]) | (1 << shift[dir][state][2]) :
+    //                         ((prev_state != state) ?
+    //                         0b000000 | (1 << shift[dir][state][0]) | (1 << shift[dir][state][2]) :
+    //                         0b000000 | (1 << shift[dir][state][0])); 
+    
+    // uint32_t deadtime = 0b000000 | (1 << shift[dir][state][0]) ; 
+
     uint32_t control = (throttle == 0) ?
                         0b000000 | (1 << shift[dir][state][0]) | (0 << shift[dir][state][1]) | (1 << shift[dir][state][2]) :
                         0b000000 | (1 << shift[dir][state][0]) | (pwm << shift[dir][state][1]) | (!pwm << shift[dir][state][2]); 
+
+    // Only use deadtime for switching phase; i.e. the grounded phase remains grounded. 
+    // uint32_t deadtime = (control == prev_control) ? control : 0b000000 | (1 << shift[dir][state][0]); 
+
+    int deadtime_a;
+    int deadtime_b; 
+    int deadtime_c;
+
+    if ((control & 0b110000) == (prev_control & 0b110000)) {
+        deadtime_a = (control & 0b110000);
+    } else {
+        deadtime_a = 0b000000;
+    }
+
+    if ((control & 0b001100) == (prev_control & 0b001100)) {
+        deadtime_b = (control & 0b001100);
+    } else {
+        deadtime_b = 0b000000;
+    }
+
+    if ((control & 0b000011) == (prev_control & 0b000011)) {
+        deadtime_c = (control & 0b000011);
+    } else {
+        deadtime_c = 0b000000;
+    }
+
+    uint32_t deadtime = deadtime_a | deadtime_b | deadtime_c ;
     
     uint32_t data = (control << 6) | deadtime;
     pio_sm_put_blocking(gd_pio, gd_sm, data);
-    prev_throttle = throttle;
+    // prev_throttle = throttle;
+    prev_control = control;
 }
 
 void irq_handler(uint gpio, uint32_t events) {
@@ -182,7 +213,6 @@ void core1_entry() {
     //     }
     //     tight_loop_contents();
     // }
-
     
     irq_set_priority(IO_IRQ_BANK0, 1);
     irq_set_enabled(IO_IRQ_BANK0, true);
@@ -208,8 +238,11 @@ void core1_entry() {
     );
 
     int a = gpio_get(input_pins[0]);
+    // int a = 0;
     int b = gpio_get(input_pins[1]);
+    // int b = 0;
     int c = gpio_get(input_pins[2]);
+    // int c = 0;
     state = ((a << 2) | (b << 1) | (c)) - 1;
     prev_state = state;
 
@@ -223,7 +256,6 @@ int main() {
 
     // Highest priority assigned to PIO PWM interrupt
     irq_set_priority(PIO0_IRQ_0, 0);
-
     irq_set_enabled(PIO0_IRQ_0, true);
     
     // Status LED
