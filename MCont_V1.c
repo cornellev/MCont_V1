@@ -27,8 +27,11 @@ volatile float throttle = 0;
 volatile float prev_throttle = 0;
 volatile uint32_t prev_control = 0b000000;
 volatile float motor_rpm = 0.0f;
+const float RATED_MOTOR_VOLTAGE = 48.0f;
 const float RATED_MOTOR_RPM = 3000.0f;
-const float RATED_MOTOR_VOLTAGE = 12.0f;
+
+// const float RATED_MOTOR_VOLTAGE = 31.0f;
+// const float RATED_MOTOR_RPM = 31.0f * (3000.0f / 48.0f);
 const float MAX_VOLTAGE_AT_STALL = 6.0f;
 #define MIN_RPM 25.0f
 #define WRAPVAL 255
@@ -63,6 +66,8 @@ const uint8_t shift[2][6][3] = {
     }
 };
 
+const uint8_t next[6] = { 2, 5, 1, 4, 0, 3 };
+
 // PWM PIO state machine
 PIO pwm_pio = pio0;
 int pwm_sm = 0;
@@ -86,7 +91,7 @@ int duty_cycle_to_level(float duty_cycle)
         duty_cycle = 1.0f;
     }
 
-    return (int)(duty_cycle * WRAPVAL + 1);
+    return (int)(duty_cycle * WRAPVAL);
 }
 
 int adc_deadzone(int adc_value)
@@ -117,7 +122,7 @@ void pio_pwm_set_level(PIO pio, uint sm, uint32_t level) {
 
 // Update values to drive the phases.
 void update_control() {
-    int pwm = gpio_get(PWM_PIN);  
+    int pwm = gpio_get(PWM_PIN); 
 
     // uint32_t deadtime = (prev_throttle == 0 & throttle == 0) ?
     //                     0b000000 | (1 << shift[dir][state][0]) | (1 << shift[dir][state][2]) :
@@ -169,6 +174,8 @@ void irq_handler(uint gpio, uint32_t events) {
     int a = gpio_get(input_pins[0]);
     int b = gpio_get(input_pins[1]);
     int c = gpio_get(input_pins[2]);
+    if ((((a << 2) | (b << 1) | (c)) - 1) != next[state]) { return; }
+
     prev_state = state;
     state = ((a << 2) | (b << 1) | (c)) - 1;
     update_control();
@@ -204,16 +211,7 @@ void pwm_irq0() {
 }
 
 // Please only include print statements on core 1!
-void core1_entry() {
-    // int print_time = time_us_64();
-    // while (true) {
-    //     if (time_us_64() - print_time > 1000) {
-    //         print_time = time_us_64();
-    //         printf("Here\n");
-    //     }
-    //     tight_loop_contents();
-    // }
-    
+void core1_entry() {    
     irq_set_priority(IO_IRQ_BANK0, 1);
     irq_set_enabled(IO_IRQ_BANK0, true);
 
@@ -246,6 +244,14 @@ void core1_entry() {
     state = ((a << 2) | (b << 1) | (c)) - 1;
     prev_state = state;
 
+    // int print_time = time_us_64();
+    // while (true) {
+    //     if (time_us_64() - print_time > 1000) {
+    //         print_time = time_us_64();
+    //         printf("State: %d\n", state);
+    //     }
+    //     tight_loop_contents();
+    // }
 }
 
 int main() {
@@ -309,9 +315,12 @@ int main() {
                 motor_rpm = 0.0f;
         }
 
-        throttle = (float)adc_deadzone(adc_read()) / 4095.0f;
+        // throttle = (float)adc_deadzone(adc_read()) / 4095.0f;
+        throttle = (float)adc_deadzone(adc_read()) / 5000.0f;
         // throttle = 0.005;
-        float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
+        float max_duty = (motor_rpm / RATED_MOTOR_RPM + MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE);
+        if (max_duty > 1.0) { max_duty = 1.0; }
+        float duty = throttle * max_duty;
         pio_pwm_set_level(pwm_pio, pwm_sm, duty_cycle_to_level(duty));
     }
 }
