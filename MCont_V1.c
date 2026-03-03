@@ -23,8 +23,6 @@ const uint32_t timer_us = 100 * 1000; // 100ms update velocity without hall trig
 
 // controls, velocity feedback, and volts per hertz values
 volatile int dir = 1; // Car dir = 1, dyno dir = 1
-volatile float throttle = 0;
-volatile float prev_throttle = 0;
 volatile uint32_t prev_control = 0b000000;
 volatile float motor_rpm = 0.0f;
 const float MAX_VOLTAGE_AT_STALL = 6.0f;
@@ -119,11 +117,7 @@ void pio_pwm_set_level(PIO pio, uint sm, uint32_t level) {
 // Update values to drive the phases.
 void update_control() {
     int pwm = gpio_get(PWM_PIN); 
-        
-
-    uint32_t control = (throttle == 0) ?
-                        0b000000 | (1 << shift[dir][state][0]) | (0 << shift[dir][state][1]) | (1 << shift[dir][state][2]) :
-                        0b000000 | (1 << shift[dir][state][0]) | (pwm << shift[dir][state][1]) | (!pwm << shift[dir][state][2]); 
+    uint32_t control = 0b000000 | (1 << shift[dir][state][0]) | (pwm << shift[dir][state][1]) | (!pwm << shift[dir][state][2]); 
 
     // Only use deadtime for switching phase; i.e. the grounded phase remains grounded. 
     // uint32_t deadtime = 0b000000 | (1 << shift[dir][state][0]) ; 
@@ -155,7 +149,6 @@ void update_control() {
     
     uint32_t data = (control << 6) | deadtime;
     pio_sm_put_blocking(gd_pio, gd_sm, data);
-    // prev_throttle = throttle;
     prev_control = control;
 }
 
@@ -186,10 +179,6 @@ void irq_handler(uint gpio, uint32_t events) {
     // low-pass filter
     float alpha = step_period / (TAU + step_period);
     motor_rpm = alpha * raw_rpm + (1.0f - alpha) * motor_rpm;
-
-    // update volts per hertz control with new speed
-    float duty = throttle * (motor_rpm / RATED_MOTOR_RPM + MAX_DUTY_AT_STALL);
-    pio_pwm_set_level(pwm_pio, pwm_sm, (int)(duty * WRAPVAL));
 }
 
 // Update controls on rising & falling edges of PWM signal. 
@@ -223,12 +212,13 @@ void core1_entry() {
         &irq_handler
     );
 
-    int a = gpio_get(input_pins[0]);
     // int a = 0;
-    int b = gpio_get(input_pins[1]);
     // int b = 0;
-    int c = gpio_get(input_pins[2]);
     // int c = 0;
+
+    int a = gpio_get(input_pins[0]);
+    int b = gpio_get(input_pins[1]);
+    int c = gpio_get(input_pins[2]);
     state = ((a << 2) | (b << 1) | (c)) - 1;
 
     // int print_time = time_us_32();
@@ -280,7 +270,6 @@ int main() {
     adc_select_input(0);
 
     uint32_t timer_current_time = time_us_32();
-    // sleep_ms(100); // REMEMBER TO REMOVE THIS
 
     while (true)
     {
@@ -311,16 +300,9 @@ int main() {
                 motor_rpm = 0.0f;
         }
 
-        throttle = (float) adc_deadzone(adc_read()) / 4095.0f;
-        // throttle = 1.0;
+        float throttle = (float) adc_deadzone(adc_read()) / 4095.0f;
         float max_duty = constrainf(motor_rpm / RATED_MOTOR_RPM + MAX_DUTY_AT_STALL, 0.0f, 1.0f);
         float duty = constrainf(throttle * max_duty, 0.0f, 1.0f);
         pio_pwm_set_level(pwm_pio, pwm_sm, (int)(duty * WRAPVAL));
-
-        // convenient testing stuff
-        // throttle = 0.005;
-        // float duty = 0.98;
-        // pio_pwm_set_level(pwm_pio, pwm_sm, (int)(throttle * WRAPVAL));
-        // pio_pwm_set_level(pwm_pio, pwm_sm, 254);
     }
 }
