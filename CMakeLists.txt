@@ -54,7 +54,11 @@ target_link_libraries(MCont_V1
         hardware_pio
         hardware_adc
         hardware_clocks
-        pico_stdlib)
+        pico_stdlib
+        hardware_spi
+        hardware_dma
+        hardware_irq
+        )
 
 # Add the standard include files to the build
 target_include_directories(MCont_V1 PRIVATE
