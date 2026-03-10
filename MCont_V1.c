@@ -110,7 +110,7 @@ static bool bit_stuff(const uint8_t *in, size_t len, uint8_t *out, uint32_t *bit
 static void build_payload(uint8_t *payload) {
     telemetry_t snap = latest_telem;
     pack_u32_le(&payload[0], snap.ts_us);
-    pack_f32_le(&payload[4], snap.motor_rpm);
+    pack_f32_le(&payload[4], snap.motor_rpm / 5.0f); // divide by 5 for gearbox
     pack_f32_le(&payload[8], snap.throttle);
 }
 
@@ -190,27 +190,17 @@ static void configure_spi_slave(void) {
 
 static void spi_irq_handler(uint gpio, uint32_t events) {
     if (events & GPIO_IRQ_EDGE_FALL) {
-        answer_spi();
-    } else if (events & GPIO_IRQ_EDGE_RISE) {
         if (spi_tx_dma_chan >= 0) { dma_channel_abort(spi_tx_dma_chan); }
         set_gpio_hi_z(PIN_TX);
+    } else if (events & GPIO_IRQ_EDGE_RISE) {
+        answer_spi();
     }
 }
 
 void core1_entry() {    
-    spi_init(SPI_PORT, 1 * 1000 * 1000);
-    spi_set_slave(SPI_PORT, true);
-    spi_set_format(SPI_PORT, 8, SPI_CPOL_0, SPI_CPHA_1, SPI_MSB_FIRST);
-
-    gpio_set_function(PIN_RX,  GPIO_FUNC_SPI);
-    gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
-    set_gpio_hi_z(PIN_TX);
+    configure_spi_slave();
 
     irq_set_enabled(IO_IRQ_BANK0, true);
-    gpio_init(PIN_CS);
-    gpio_set_dir(PIN_CS, GPIO_IN);
-    gpio_pull_up(PIN_CS);
     gpio_set_irq_enabled_with_callback(
         PIN_CS, 
         GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, 
@@ -234,8 +224,7 @@ void core1_entry() {
 // ====================================================================
 
 #define OUT_PINS 10
-// #define PWM_PIN 16
-#define PWM_PIN 6
+#define PWM_PIN 16
 #define LED 17
 #define THROTTLE_ADC 26
 
