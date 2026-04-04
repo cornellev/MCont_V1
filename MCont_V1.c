@@ -239,11 +239,11 @@ const uint32_t timer_us = 100 * 1000; // 100ms update velocity without hall trig
 volatile int dir = 1; // Car dir = 1, dyno dir = 1
 volatile uint32_t prev_control = 0b000000;
 volatile float motor_rpm = 0.0f;
-const float MAX_VOLTAGE_AT_STALL = 6.0f;
-// const float RATED_MOTOR_VOLTAGE = 48.0f;
-// const float RATED_MOTOR_RPM = 3000.0f;
-const float RATED_MOTOR_VOLTAGE = 31.0f;
-const float RATED_MOTOR_RPM = 31.0f * (3000.0f / 48.0f);
+const float MAX_VOLTAGE_AT_STALL = 4.0f;
+const float RATED_MOTOR_VOLTAGE = 48.0f;
+const float RATED_MOTOR_RPM = 3000.0f;
+// const float RATED_MOTOR_VOLTAGE = 31.0f;
+// const float RATED_MOTOR_RPM = 31.0f * (3000.0f / 48.0f);
 const float MAX_DUTY_AT_STALL = MAX_VOLTAGE_AT_STALL / RATED_MOTOR_VOLTAGE;
 
 #define MIN_RPM 25.0f
@@ -380,7 +380,7 @@ void irq_handler(uint gpio, uint32_t events) {
 
     // time between steps in microseconds
     float step_period = (float)(irq_current_time - irq_prev_time);
-    if (step_period <= 800.0f) { // invalid period, ignore
+    if (step_period <= 600.0f) { // invalid period, ignore
         return;
     }
 
