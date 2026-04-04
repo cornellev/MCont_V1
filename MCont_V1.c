@@ -471,14 +471,17 @@ int main() {
 
     while (true)
     {
-        if (time_us_32() - timer_current_time > timer_us) {
-            
+        
+        if (time_us_32() - irq_prev_time > timer_us) {
+
             // Timeout for hall input jitter filter.
             int a = gpio_get(input_pins[0]);
             int b = gpio_get(input_pins[1]);
             int c = gpio_get(input_pins[2]);
-            state = ((a << 2) | (b << 1) | (c)) - 1;
-            update_control();
+            if (state != ((a << 2) | (b << 1) | (c)) - 1) {
+                state = ((a << 2) | (b << 1) | (c)) - 1;
+                update_control();
+            }
 
             // no velocity on boot
             if (irq_prev_time == 0) {
